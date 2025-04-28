@@ -152,7 +152,7 @@ def ejemplo_tsp():
     random.seed(42)
 
     # Crear una instancia de problema TSP de 4 ciudades
-    num_cities = 4
+    num_cities = 10
     coords = np.random.rand(num_cities, 2) * 100  # Coordenadas en un plano (0-100)
     distance_matrix = np.linalg.norm(coords[:, np.newaxis, :] - coords[np.newaxis, :, :], axis=2)
 
@@ -163,9 +163,6 @@ def ejemplo_tsp():
     tsp = TabuSearch(distance_matrix, tabu_tenure=5, max_iterations=500, max_no_improve=50)
     mejor_solucion, mejor_distancia, historial = tsp.run(verbose=True)
 
-    print("\nRecorrido final:")
-    print(mejor_solucion)
-    print(f"Distancia final: {mejor_distancia:.2f}")
     
     # Dibujar el grafo de ciudades y la mejor ruta encontrada
     dibujar_grafo(coords, distance_matrix, mejor_solucion)
