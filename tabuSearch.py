@@ -1,63 +1,159 @@
 import random
-import copy
+import numpy as np
+import matplotlib.pyplot as plt
+import networkx as nx 
 
-def calcular_distancia(ruta, distancias):
-    distancia_total = 0
-    for i in range(len(ruta)):
-        distancia_total += distancias[ruta[i]][ruta[(i + 1) % len(ruta)]]
-    return distancia_total
+class TabuSearchTSP:
+    def __init__(self, distance_matrix, tabu_tenure=10, max_iterations=1000, max_no_improve=100):
+        self.distance_matrix = distance_matrix
+        self.num_cities = distance_matrix.shape[0]
+        self.tabu_tenure = tabu_tenure
+        self.max_iterations = max_iterations
+        self.max_no_improve = max_no_improve
 
-def generar_vecinos(ruta):
-    vecinos = []
-    for i in range(len(ruta)):
-        for j in range(i + 1, len(ruta)):
-            vecino = ruta[:]
-            vecino[i], vecino[j] = vecino[j], vecino[i]
-            vecinos.append(vecino)
-    return vecinos
+        # Solución inicial aleatoria
+        self.current_solution = list(range(self.num_cities))
+        random.shuffle(self.current_solution)
 
-def tabu_search(distancias, ciudades, iteraciones=100, tamaño_tabu=10):
-    ruta_actual = ciudades[:]
-    random.shuffle(ruta_actual)
-    mejor_ruta = ruta_actual[:]
-    mejor_distancia = calcular_distancia(mejor_ruta, distancias)
+        self.best_solution = self.current_solution.copy()
+        self.best_distance = self.evaluate(self.best_solution)
+        self.current_distance = self.best_distance
 
-    lista_tabu = []
+        self.tabu_list = {}
+        self.history = {
+            'solutions': [self.current_solution.copy()],
+            'distances': [self.current_distance]
+        }
 
-    for iteracion in range(iteraciones):
-        vecinos = generar_vecinos(ruta_actual)
-        vecinos = [v for v in vecinos if v not in lista_tabu]
+    def evaluate(self, solution):
+        """Calcula la distancia total de un recorrido."""
+        distance = 0
+        for i in range(len(solution)):
+            distance += self.distance_matrix[solution[i-1]][solution[i]]
+        return distance
 
-        if not vecinos:
-            break
+    def run(self, verbose=True):
+        iteration = 0
+        no_improve = 0
 
-        mejor_vecino = min(vecinos, key=lambda x: calcular_distancia(x, distancias))
-        mejor_vecino_distancia = calcular_distancia(mejor_vecino, distancias)
+        if verbose:
+            print(f"Solución inicial: {self.current_solution}, Distancia: {self.current_distance:.2f}")
 
-        if mejor_vecino_distancia < mejor_distancia:
-            mejor_ruta = mejor_vecino[:]
-            mejor_distancia = mejor_vecino_distancia
+        while iteration < self.max_iterations and no_improve < self.max_no_improve:
+            candidate_moves = []
+            for i in range(self.num_cities):
+                for j in range(i+1, self.num_cities):
+                    move = (i, j)
+                    is_tabu = move in self.tabu_list and self.tabu_list[move] > iteration
 
-        lista_tabu.append(mejor_vecino)
-        if len(lista_tabu) > tamaño_tabu:
-            lista_tabu.pop(0)
+                    # Crear vecino (intercambiar dos ciudades)
+                    neighbor = self.current_solution.copy()
+                    neighbor[i], neighbor[j] = neighbor[j], neighbor[i]
 
-        ruta_actual = mejor_vecino
+                    neighbor_distance = self.evaluate(neighbor)
 
-        print(f"Iteración {iteracion+1}: Distancia = {mejor_vecino_distancia}")
+                    if not is_tabu or neighbor_distance < self.best_distance:
+                        candidate_moves.append((move, neighbor, neighbor_distance))
 
-    return mejor_ruta, mejor_distancia
+            if not candidate_moves:
+                if verbose:
+                    print("No hay movimientos candidatos disponibles. Terminando.")
+                break
 
-# 🔧 Ejemplo de uso
-ciudades = list(range(5))
-distancias = [
-    [0, 2, 9, 10, 7],
-    [2, 0, 6, 4, 3],
-    [9, 6, 0, 8, 5],
-    [10, 4, 8, 0, 6],
-    [7, 3, 5, 6, 0]
-]
+            # Seleccionar el mejor vecino
+            best_move, best_neighbor, best_neighbor_distance = min(candidate_moves, key=lambda x: x[2])
 
-mejor_ruta, mejor_distancia = tabu_search(distancias, ciudades, iteraciones=100, tamaño_tabu=5)
-print(f"\nMejor ruta encontrada: {mejor_ruta}")
-print(f"Distancia total: {mejor_distancia}")
+            # Actualizar solución actual
+            self.current_solution = best_neighbor
+            self.current_distance = best_neighbor_distance
+
+            # Actualizar lista tabú
+            self.tabu_list[best_move] = iteration + self.tabu_tenure
+            inverse_move = (best_move[1], best_move[0])
+            self.tabu_list[inverse_move] = iteration + self.tabu_tenure
+
+            # Actualizar mejor solución
+            if best_neighbor_distance < self.best_distance:
+                self.best_solution = best_neighbor.copy()
+                self.best_distance = best_neighbor_distance
+                no_improve = 0
+                if verbose:
+                    print(f"Iteración {iteration}: Nueva mejor solución encontrada! Distancia: {self.best_distance:.2f}")
+            else:
+                no_improve += 1
+
+            # Historial
+            self.history['solutions'].append(self.current_solution.copy())
+            self.history['distances'].append(self.current_distance)
+
+            # Limpiar movimientos expirados
+            expired_moves = [move for move, exp_iter in self.tabu_list.items() if exp_iter <= iteration]
+            for move in expired_moves:
+                del self.tabu_list[move]
+
+            iteration += 1
+
+        if verbose:
+            print(f"\nBúsqueda Tabú terminada después de {iteration} iteraciones.")
+            print(f"Mejor recorrido: {self.best_solution}")
+            print(f"Distancia mínima: {self.best_distance:.2f}")
+
+        return self.best_solution, self.best_distance, self.history
+
+def dibujar_grafo(coords, distance_matrix, best_solution):
+    G = nx.Graph()
+
+    # Agregar nodos (ciudades)
+    for i, (x, y) in enumerate(coords):
+        G.add_node(i, pos=(x, y))
+
+    # Agregar aristas (todas las conexiones posibles con su distancia)
+    for i in range(len(coords)):
+        for j in range(i+1, len(coords)):
+            G.add_edge(i, j, weight=round(distance_matrix[i][j], 1))
+
+    pos = nx.get_node_attributes(G, 'pos')
+    labels = nx.get_edge_attributes(G, 'weight')
+
+    plt.figure(figsize=(10, 8))
+
+    # Dibujar todos los bordes en gris claro
+    nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=600, edge_color='lightgray', font_size=12)
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels, font_color='gray', font_size=8)
+
+    # Dibujar el mejor recorrido en rojo grueso
+    path_edges = [(best_solution[i-1], best_solution[i]) for i in range(len(best_solution))]
+    nx.draw_networkx_edges(G, pos, edgelist=path_edges, edge_color='red', width=3)
+
+    plt.title("Grafo de Ciudades y Mejor Recorrido (en rojo)", fontsize=16)
+    plt.axis('off')
+    plt.show()
+
+# Función de ejemplo para probar, no sera aleatorio 
+def ejemplo_tsp():
+    np.random.seed(42)
+    random.seed(42)
+
+    # Crear una matriz de distancias entre 8 ciudades
+    num_cities = 4
+    coords = np.random.rand(num_cities, 2) * 100  # Coordenadas aleatorias en un plano
+    distance_matrix = np.linalg.norm(coords[:, np.newaxis, :] - coords[np.newaxis, :, :], axis=2)
+
+    print("Matriz de distancias:")
+    print(distance_matrix.round(2))
+
+    # Ejecutar búsqueda tabú
+    tsp = TabuSearchTSP(distance_matrix, tabu_tenure=5, max_iterations=500, max_no_improve=50)
+    mejor_solucion, mejor_distancia, historial = tsp.run(verbose=True)
+
+    print("\nRecorrido final:")
+    print(mejor_solucion)
+    print(f"Distancia final: {mejor_distancia:.2f}")
+    
+    dibujar_grafo(coords, distance_matrix, mejor_solucion)
+
+# Ejecutar ejemplo
+if __name__ == "__main__":
+    ejemplo_tsp()
+    
+
